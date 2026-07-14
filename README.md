@@ -1,55 +1,38 @@
-# Pathways2Care AI Chatbot & Widget
+# AI Chatbot for Businesses (Pathways2Care Pilot)
 
-A multi-tenant, AI-powered customer support chatbot designed specifically for NDIS providers. Built with a fast, modern tech stack for instantaneous responses, complete with an embeddable widget.
+A full-stack, multi-tenant AI chatbot platform designed specifically for NDIS providers, but architected to scale to any SMB.
 
-## Architecture & Tech Stack
+## Architecture
 
-This project is a monorepo containing the backend API and the embeddable frontend widget.
+This monorepo contains a complete, production-ready system:
 
-- **Backend API (`apps/api`)**
-  - **Node.js & Express**: Handles chat requests and semantic search.
-  - **Database**: Supabase `pgvector` for storing and querying text embeddings.
-  - **Embeddings**: Gemini API (`gemini-embedding-2`) for lightning-fast knowledge base vectorization.
-  - **Generation**: NVIDIA NIM (`meta/llama-3.1-8b-instruct`) using the OpenAI SDK for blazing-fast inference.
-  - **Compliance**: Strict NDIS guardrails baked into the system prompt to prevent giving medical advice or commenting on eligibility.
+- **`/apps/api` (Backend Express Server)**
+  - Handles RAG (Retrieval-Augmented Generation) using Supabase `pgvector`.
+  - Embeddings powered by `gemini-embedding-2`.
+  - Chat generation powered by `meta/llama-3.1-8b-instruct` (NVIDIA NIM) for blazing-fast inference.
+  - Fully hardened with `helmet` security headers, strict CORS, rate limiting (20 req/min), and global error handlers.
 
-- **Frontend Widget (`apps/widget`)**
-  - **Vanilla TypeScript/JS**: Zero-dependency frontend logic ensuring maximum compatibility on any website (WordPress, Elementor, etc.).
-  - **Vite & CSS Injection**: Built using Vite with `vite-plugin-css-injected-by-js` to output a single, universally embeddable `main.js` file.
-  - **Design**: Premium glassmorphism styling, micro-animations, and dynamic configuration via dataset attributes.
+- **`/apps/dashboard` (Admin Next.js Frontend)**
+  - Built with Next.js App Router, Tailwind CSS, and Recharts.
+  - **Conversations & Analytics**: Live monitoring of chat transcripts and key performance metrics (Token usage, volume, trends).
+  - **CRM**: Patient records management and the ability to manually link anonymous chatbot sessions to specific patient profiles.
+  - **Settings**: Tenant-level widget configuration (colors, custom prompts).
 
-## How It Works (RAG System)
+- **`/apps/widget` (Embeddable Frontend)**
+  - Vanilla JS, injected via `<script>` tag into any website.
+  - Fetches dynamic settings (like primary color and welcome message) directly from the dashboard configurations.
 
-1. The company's knowledge base is scraped and chunked.
-2. The chunks are embedded using Gemini and stored in Supabase `pgvector`.
-3. When a user asks a question via the frontend widget, the backend API uses Gemini to embed the query and searches Supabase for the most relevant context using cosine similarity.
-4. The relevant context is passed to the NVIDIA NIM LLM, strictly bound by NDIS compliance rules, which returns a concise, accurate response.
+## Database & Security
 
-## Getting Started
+Powered by Supabase PostgreSQL. The database is strictly secured:
+- **Row Level Security (RLS)** is enabled on all tables.
+- Public data access is completely blocked. 
+- The backend API and dashboard utilize the `SUPABASE_SERVICE_ROLE_KEY` to securely bypass RLS for administrative operations.
 
-### 1. Environment Setup
+## Development
 
-Create an `.env` file in `apps/api/` (refer to `.env.example`):
-```bash
-PORT=3000
-SUPABASE_URL="your-supabase-url"
-SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-GEMINI_API_KEY="your-gemini-key"
-NVIDIA_API_KEY="your-nvidia-key"
-```
+1. **Dashboard**: `cd apps/dashboard && npm run dev` (Runs on port 3002)
+2. **API**: `cd apps/api && npm run dev` (Runs on port 3000)
+3. **Widget**: `cd apps/widget && npm run dev` (Runs on port 5173)
 
-### 2. Backend (API)
-```bash
-cd apps/api
-npm install
-npx tsx seed.ts  # (Optional) Seed the vector database with the knowledge base
-npx tsx index.ts # Start the API server
-```
-
-### 3. Frontend (Widget)
-```bash
-cd apps/widget
-npm install
-npm run dev # Test the widget locally
-npm run build # Build the single-file embed script for production
-```
+*Note: Ensure you have populated `.env` in the API and `.env.local` in the dashboard before starting the servers.*

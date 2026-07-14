@@ -1,5 +1,7 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -23,15 +25,64 @@ if (!process.env.GEMINI_API_KEY) {
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-app.use(cors());
+app.use(helmet());
+
+const allowedOrigins = ['http://localhost:5173', 'http://localhost:3002'];
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
+
 app.use(express.json());
+
+// Rate limiting for chat to prevent abuse
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20, // limit each IP to 20 requests per windowMs
+  message: { error: 'Too many requests, please try again later.' }
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.post('/chat', async (req, res) => {
+// Fetch widget settings
+app.get('/settings/:tenant_id', async (req, res) => {
+  const { tenant_id } = req.params;
+  
+  if (!tenant_id) {
+    return res.status(400).json({ error: "Missing tenant_id" });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('tenant_settings')
+      .select('primary_color, welcome_message')
+      .eq('tenant_id', tenant_id)
+      .single();
+      
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No settings found, return defaults (or empty 200 so widget uses defaults)
+        return res.json({});
+      }
+      throw error;
+    }
+    
+    res.json(data);
+  } catch (error) {
+    console.error("Settings fetch error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post('/chat', chatLimiter, async (req, res) => {
   const { message, tenant_id, session_id } = req.body;
   
   if (!message || !tenant_id) {
@@ -39,12 +90,37 @@ app.post('/chat', async (req, res) => {
   }
 
   try {
-    // 1. Generate embedding for the user's message using Gemini
+    // 1. Ensure conversation exists in DB
+    let { data: conversation } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('session_id', session_id)
+      .eq('tenant_id', tenant_id)
+      .single();
+
+    if (!conversation) {
+      const { data: newConv, error: convErr } = await supabase
+        .from('conversations')
+        .insert({ tenant_id, session_id })
+        .select('id')
+        .single();
+      if (convErr) throw convErr;
+      conversation = newConv;
+    }
+
+    // 2. Log user message
+    await supabase.from('messages').insert({
+      conversation_id: conversation.id,
+      role: 'user',
+      content: message
+    });
+
+    // 3. Generate embedding for the user's message using Gemini
     const embedModel = genAI.getGenerativeModel({ model: "gemini-embedding-2" });
     const embedResponse = await embedModel.embedContent(message);
     const queryEmbedding = embedResponse.embedding.values;
 
-    // 2. Query Supabase for relevant context
+    // 4. Query Supabase for relevant context
     const { data: documents, error: matchError } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       match_threshold: 0.3, // Lowered threshold to ensure we catch relevant docs
@@ -60,8 +136,17 @@ app.post('/chat', async (req, res) => {
     console.log(`Matched ${documents?.length || 0} documents from Supabase`);
     const contextText = documents?.map((doc: any) => doc.content).join('\n\n') || "No specific context found.";
 
-    // 3. Build the prompt with NDIS Compliance Rules
-    const systemPrompt = `You are a helpful customer support AI for Pathways2Care, an NDIS provider.
+    // 4.5 Fetch custom system prompt
+    const { data: settings } = await supabase
+      .from('tenant_settings')
+      .select('system_prompt')
+      .eq('tenant_id', tenant_id)
+      .single();
+
+    const customPrompt = settings?.system_prompt || "You are a helpful AI assistant for an NDIS provider. Answer questions politely.";
+
+    // 5. Build the prompt with NDIS Compliance Rules
+    const systemPrompt = `${customPrompt}
     
 CRITICAL NDIS COMPLIANCE RULES:
 1. NEVER give medical, clinical, or therapeutic advice.
@@ -79,7 +164,7 @@ BUSINESS CONTEXT:
 ${contextText}
 `;
 
-    // 4. Call Nvidia API to generate the response (OpenAI compatible)
+    // 6. Call Nvidia API to generate the response (OpenAI compatible)
     const openai = new OpenAI({
       apiKey: process.env.NVIDIA_API_KEY,
       baseURL: 'https://integrate.api.nvidia.com/v1',
@@ -95,11 +180,26 @@ ${contextText}
       max_tokens: 300,
     });
 
-    res.json({ reply: completion.choices[0].message.content });
+    const replyContent = completion.choices[0].message.content;
+
+    // 7. Log assistant message
+    await supabase.from('messages').insert({
+      conversation_id: conversation.id,
+      role: 'assistant',
+      content: replyContent
+    });
+
+    res.json({ reply: replyContent });
   } catch (error) {
     console.error("Chat error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Internal server error", correlationId: Math.random().toString(36).substring(7) });
   }
+});
+
+// Global Error Handler (Prompt 3: Pre-Deploy Production Audit)
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error('Unhandled Error:', err.stack || err);
+  res.status(500).json({ error: 'Internal server error', correlationId: Math.random().toString(36).substring(7) });
 });
 
 app.listen(port, () => {

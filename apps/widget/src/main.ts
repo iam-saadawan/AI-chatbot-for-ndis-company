@@ -1,19 +1,42 @@
 import './style.css';
 
 class PathwaysWidget {
-  private container: HTMLDivElement;
-  private fab: HTMLButtonElement;
-  private window: HTMLDivElement;
-  private messagesContainer: HTMLDivElement;
-  private input: HTMLInputElement;
-  private sendBtn: HTMLButtonElement;
+  private container!: HTMLDivElement;
+  private fab!: HTMLButtonElement;
+  private window!: HTMLDivElement;
+  private messagesContainer!: HTMLDivElement;
+  private input!: HTMLInputElement;
+  private sendBtn!: HTMLButtonElement;
   
   private isOpen: boolean = false;
   private tenantId: string = 'b30e384b-71d8-45eb-8454-96246ee4c451'; // We will allow overriding via attribute, fallback for now
   private apiUrl: string = 'http://localhost:3000/chat';
+  private sessionId: string;
 
   constructor() {
+    this.sessionId = Math.random().toString(36).substring(2, 15);
     this.init();
+  }
+
+  private async fetchSettings() {
+    try {
+      const res = await fetch(`http://localhost:3000/settings/${this.tenantId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.primary_color) {
+          this.container.style.setProperty('--pw-primary', data.primary_color);
+          this.container.style.setProperty('--pw-primary-gradient', `linear-gradient(135deg, ${data.primary_color} 0%, #8b5cf6 100%)`);
+        }
+        if (data.welcome_message) {
+          const firstMsg = this.messagesContainer.querySelector('.pw-bot');
+          if (firstMsg) {
+            firstMsg.textContent = data.welcome_message;
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch widget settings", error);
+    }
   }
 
   private init() {
@@ -78,6 +101,9 @@ class PathwaysWidget {
       e.preventDefault();
       this.sendMessage();
     });
+
+    // 5. Fetch custom settings
+    this.fetchSettings();
   }
 
   private toggleWindow() {
@@ -130,7 +156,8 @@ class PathwaysWidget {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          tenant_id: this.tenantId
+          tenant_id: this.tenantId,
+          session_id: this.sessionId
         })
       });
 
