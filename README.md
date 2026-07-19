@@ -9,7 +9,7 @@ This monorepo contains a complete, production-ready system:
 - **`/apps/api` (Backend Express Server)**
   - Handles RAG (Retrieval-Augmented Generation) using Supabase `pgvector`.
   - Embeddings powered by `gemini-embedding-2`.
-  - Chat generation powered by `meta/llama-3.1-8b-instruct` (NVIDIA NIM) for blazing-fast inference.
+  - Chat generation powered by `gemini-2.5-flash` (Google AI Studio) for free, blazing-fast inference and context handling.
   - Fully hardened with `helmet` security headers, strict CORS, rate limiting (20 req/min), and global error handlers.
 
 - **`/apps/dashboard` (Admin Next.js Frontend)**

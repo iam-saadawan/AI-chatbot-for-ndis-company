@@ -156,31 +156,29 @@ CRITICAL NDIS COMPLIANCE RULES:
 5. ALWAYS offer a human escalation path (e.g., "Would you like me to arrange a callback from our team?").
 6. If the user mentions self-harm, abuse, or neglect, immediately provide emergency contacts (000, Lifeline 13 11 14) and offer human escalation.
 7. You must identify yourself as an AI assistant if asked.
-8. ALWAYS keep your responses extremely concise (1-3 short paragraphs max). Do not ramble.
-
+8. ALWAYS keep your responses EXTREMELY short and conversational (1-2 sentences max). Use bullet points if listing things. Do not write long paragraphs. People hate reading long paragraphs.
+9. LEAD GENERATION: If the user is inquiring about services, actively ask for their name, email, or phone number so a team member can contact them. Do not end the conversation without trying to capture their contact details.
 Use the following context from the business's knowledge base to answer the user's question. If the answer is not in the context, do not make it up; politely explain what the business offers or offer to escalate to a human.
 
 BUSINESS CONTEXT:
 ${contextText}
 `;
 
-    // 6. Call Nvidia API to generate the response (OpenAI compatible)
-    const openai = new OpenAI({
-      apiKey: process.env.NVIDIA_API_KEY,
-      baseURL: 'https://integrate.api.nvidia.com/v1',
+    // 6. Call Gemini 2.5 Flash API to generate the response (Free Tier)
+    const chatModel = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      systemInstruction: systemPrompt
+    });
+    
+    const result = await chatModel.generateContent({
+      contents: [{ role: "user", parts: [{ text: message }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 800,
+      }
     });
 
-    const completion = await openai.chat.completions.create({
-      model: "meta/llama-3.1-8b-instruct", // Using the 8B model which is blazingly fast!
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message }
-      ],
-      temperature: 0.2,
-      max_tokens: 300,
-    });
-
-    const replyContent = completion.choices[0].message.content;
+    const replyContent = result.response.text();
 
     // 7. Log assistant message
     await supabase.from('messages').insert({
